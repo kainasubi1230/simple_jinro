@@ -45,35 +45,45 @@ export default function Home() {
       setIsLoading(false);
     }
   };
-
-  // 🤝 既存の部屋に参加する
+  
+// 🤝 既存の部屋に参加する
   const handleJoinRoom = async () => {
     if (!name || !joinRoomId) return alert("名前とルームIDを入力してください");
     setIsLoading(true);
 
     try {
+      // 💡 変更点1: idだけでなく「status（現在の状態）」も一緒に取得する
       const { data: roomData, error: roomError } = await supabase
         .from("rooms")
-        .select("id")
+        .select("id, status")
         .eq("id", joinRoomId)
         .single();
-      if (roomError || !roomData) throw new Error("部屋が見つかりません");
 
-      // 🔥 修正ポイント: select().single() を追加
+      if (roomError || !roomData) {
+        setIsLoading(false);
+        return alert("部屋が見つかりません。ルームIDを確認してください。");
+      }
+
+      // 🔥 変更点2: ゲームがすでに始まっていたらブロックする！
+      if (roomData.status !== "waiting") {
+        setIsLoading(false);
+        return alert("この部屋はすでにゲームが開始されているため、途中参加できません🙅‍♂️");
+      }
+
       const { data: playerData, error: playerError } = await supabase
         .from("players")
         .insert([{ room_id: roomData.id, name: name, is_host: false }])
         .select()
         .single();
+
       if (playerError) throw playerError;
 
-      // 🧠 スマホのLocalStorageに自分のIDを記憶させる！
       localStorage.setItem("myPlayerId", playerData.id);
 
       router.push(`/rooms/${roomData.id}`);
     } catch (error) {
       console.error(error);
-      alert("参加に失敗しました。ルームIDを確認してください");
+      alert("参加に失敗しました。");
       setIsLoading(false);
     }
   };
