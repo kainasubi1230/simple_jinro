@@ -11,6 +11,8 @@ type Room = {
   last_victims: string | null; last_executed: string | null; teruteru_won: boolean; 
 };
 type Message = { id: string; player_id: string; content: string; };
+// 📖 新規追加：ログ用の型定義
+type GameLog = { id: string; day_count: number; message: string; created_at: string; };
 
 export default function PlayPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -27,6 +29,11 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   const [hasActed, setHasActed] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [chatInput, setChatInput] = useState("");
+  
+  // 📖 新規追加：ログ用ステート
+  const [logs, setLogs] = useState<GameLog[]>([]);
+
+  const [showExecutionOverlay, setShowExecutionOverlay] = useState(false);
 
   useEffect(() => {
     const init = async () => {
@@ -43,12 +50,15 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
         if (playersData) setPlayers(playersData);
       };
 
-      const fetchMessages = async () => {
-        const { data } = await supabase.from("messages").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
-        if (data) setMessages(data);
+      const fetchMessagesAndLogs = async () => {
+        const { data: msgData } = await supabase.from("messages").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
+        if (msgData) setMessages(msgData);
+        // 📖 ログの取得
+        const { data: logData } = await supabase.from("game_logs").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
+        if (logData) setLogs(logData);
       };
 
-      await fetchAll(); await fetchMessages(); setIsLoading(false);
+      await fetchAll(); await fetchMessagesAndLogs(); setIsLoading(false);
 
       const channel = supabase.channel(`play_${roomId}`)
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, 
@@ -57,7 +67,12 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, () => fetchAll())
         .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
           (payload) => setMessages((prev) => [...prev, payload.new as Message])
-        ).subscribe();
+        )
+        // 📖 ログのリアルタイム検知
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_logs", filter: `room_id=eq.${roomId}` },
+          (payload) => setLogs((prev) => [...prev, payload.new as GameLog])
+        )
+        .subscribe();
 
       return () => { supabase.removeChannel(channel); };
     };
@@ -71,9 +86,14 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     }
   }, [room?.phase, timeLeft]);
 
-  // ==========================================
-  // 🏆 勝敗判定ロジック
-  // ==========================================
+  useEffect(() => {
+    if (room?.phase === "night") {
+      setShowExecutionOverlay(true);
+      const timer = setTimeout(() => { setShowExecutionOverlay(false); }, 4000);
+      return () => clearTimeout(timer);
+    }
+  }, [room?.phase]);
+
   const checkWinOrNextPhase = useCallback(async (nextPhase: string) => {
     const { data: currentPlayers } = await supabase.from("players").select("*").eq("room_id", roomId).eq("is_alive", true);
     if (!currentPlayers) return;
@@ -86,26 +106,20 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     let newPhase = nextPhase;
 
     if (wolfCount === 0) {
-      newStatus = "finished";
-      newPhase = foxAlive ? "fox_win" : "human_win"; 
+      newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "human_win"; 
     } else if (wolfCount >= humanCount) {
-      newStatus = "finished";
-      newPhase = foxAlive ? "fox_win" : "wolf_win";
+      newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "wolf_win";
     }
 
     await supabase.from("rooms").update({ status: newStatus, phase: newPhase, day_count: nextPhase === "day" ? room!.day_count + 1 : room!.day_count }).eq("id", roomId);
     if (nextPhase === "day" && newStatus !== "finished") setTimeLeft(180);
   }, [room, roomId]);
 
-  // ==========================================
-  // ☀️ 朝にする（襲撃・護衛・呪殺の全処理）※自動で実行されます
-  // ==========================================
   const handleExecuteMorning = useCallback(async () => {
     const { data: actions } = await supabase.from("actions").select("*").eq("room_id", roomId).eq("day_count", room!.day_count).eq("phase", "night");
 
     const guardAction = actions?.find(a => a.action_type === "guard");
     const guardedId = guardAction ? guardAction.target_id : null;
-
     const seeAction = actions?.find(a => a.action_type === "see");
     const seerTargetId = seeAction ? seeAction.target_id : null;
 
@@ -123,7 +137,6 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
 
     let victimIds: string[] = [];
 
-    // 1. 人狼の襲撃判定
     if (wolfTargetId) {
       const targetPlayer = players.find(p => p.id === wolfTargetId);
       if (wolfTargetId === guardedId) { /* 護衛成功 */ }
@@ -131,68 +144,50 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
       else { victimIds.push(wolfTargetId); }
     }
 
-    // 2. 占い師の呪殺判定
     if (seerTargetId) {
       const targetPlayer = players.find(p => p.id === seerTargetId);
-      if (targetPlayer?.role === "fox" && !victimIds.includes(seerTargetId)) {
-        victimIds.push(seerTargetId);
-      }
+      if (targetPlayer?.role === "fox" && !victimIds.includes(seerTargetId)) { victimIds.push(seerTargetId); }
     }
 
     const victimNames = victimIds.map(id => players.find(p => p.id === id)?.name).join(" と ");
     const lastVictimsText = victimIds.length > 0 ? victimNames : "なし";
 
     if (victimIds.length > 0) {
-      for (const vId of victimIds) {
-        await supabase.from("players").update({ is_alive: false }).eq("id", vId);
-      }
+      for (const vId of victimIds) { await supabase.from("players").update({ is_alive: false }).eq("id", vId); }
     }
 
     await supabase.from("rooms").update({ last_victims: lastVictimsText }).eq("id", roomId);
+    
+    // 📖 ログの書き込み（朝の犠牲者）
+    const logMsg = victimIds.length > 0 ? `無残な姿で発見されたのは【${lastVictimsText}】でした。` : `昨晩は誰も犠牲になりませんでした。平和な朝です。`;
+    await supabase.from("game_logs").insert([{ room_id: roomId, day_count: room!.day_count + 1, message: logMsg }]);
+
     await checkWinOrNextPhase("day");
   }, [roomId, room, players, checkWinOrNextPhase]);
 
-  // ==========================================
-  // 🤖 夜の自動進行システム（ホストの裏側で動きます）
-  // ==========================================
   useEffect(() => {
-    // ホスト以外、または夜以外の時は何もしない
     if (!me?.is_host || room?.phase !== "night" || room?.status === "finished") return;
 
     const checkMorning = async () => {
-      // 夜に行動が必要な役職（生きている人だけカウント）
       const nightActionRoles = ["werewolf", "seer", "medium", "hunter"];
       const requiredActionCount = players.filter(p => p.is_alive && nightActionRoles.includes(p.role)).length;
 
-      // 現在の夜のアクション数をデータベースから取得
-      const { count } = await supabase
-        .from("actions")
-        .select("*", { count: "exact", head: true })
-        .eq("room_id", roomId)
-        .eq("day_count", room.day_count)
-        .eq("phase", "night");
+      const { count } = await supabase.from("actions").select("*", { count: "exact", head: true })
+        .eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "night");
 
-      // アクションが必要な人数分揃っていたら、3秒後に自動で朝にする！
       if (count !== null && count >= requiredActionCount) {
         setTimeout(() => { handleExecuteMorning(); }, 3000);
       }
     };
 
-    // 夜になった瞬間に1回チェック（誰も行動しなくていい平和な村なら即朝になります）
     checkMorning();
-
-    // 誰かが行動するたびに再チェック
     const channel = supabase.channel(`actions_night_${roomId}`)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "actions", filter: `room_id=eq.${roomId}` }, 
-        () => checkMorning()
-      ).subscribe();
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "actions", filter: `room_id=eq.${roomId}` }, () => checkMorning())
+      .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [room?.phase, room?.day_count, room?.status, players, me?.is_host, roomId, handleExecuteMorning]);
 
-  // ==========================================
-  // 👑 GM（ホスト）の進行ロジック
-  // ==========================================
   const handleProceedToVote = async () => {
     if (!confirm("議論を終了して投票に進みますか？")) return;
     await supabase.from("rooms").update({ phase: "vote" }).eq("id", roomId);
@@ -213,18 +208,20 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
       }
     }
 
-    let executedName = "なし";
+    let executedName = "なし（同票、または投票なし）";
     if (victimId) {
       const victim = players.find(p => p.id === victimId);
       executedName = victim?.name || "不明";
       await supabase.from("players").update({ is_alive: false }).eq("id", victimId);
-      if (victim?.role === "teruteru") {
-        await supabase.from("rooms").update({ teruteru_won: true }).eq("id", roomId);
-      }
+      if (victim?.role === "teruteru") { await supabase.from("rooms").update({ teruteru_won: true }).eq("id", roomId); }
     }
     
-    // 💡 処刑された人の名前を記録して夜へ
     await supabase.from("rooms").update({ last_executed: executedName }).eq("id", roomId);
+    
+    // 📖 ログの書き込み（夕方の処刑）
+    const logMsg = victimId ? `投票の結果、【${executedName}】が処刑されました。` : `投票の結果、本日の処刑者は出ませんでした。`;
+    await supabase.from("game_logs").insert([{ room_id: roomId, day_count: room!.day_count, message: logMsg }]);
+
     await checkWinOrNextPhase("night");
   };
 
@@ -252,6 +249,16 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   };
 
   if (isLoading || !me || !room) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">読み込み中...</div>;
+
+  if (showExecutionOverlay && room.status !== "finished") {
+    return (
+      <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center space-y-6 animate-pulse p-4">
+        <p className="text-gray-400 text-xl tracking-widest">本日の処刑者</p>
+        <h1 className="text-5xl font-extrabold text-red-600 drop-shadow-[0_0_15px_rgba(220,38,38,0.8)] text-center break-all">{room.last_executed}</h1>
+        <p className="text-sm text-gray-500 mt-12">恐ろしい夜が訪れます...</p>
+      </div>
+    );
+  }
 
   const aliveOtherPlayers = players.filter(p => p.is_alive && p.id !== me.id);
   const deadPlayers = players.filter(p => !p.is_alive);
@@ -284,9 +291,7 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
             <h2 className="text-3xl font-bold mb-4">
               {room.phase === "human_win" ? "🎉 村人陣営の勝利！" : room.phase === "wolf_win" ? "🐺 人狼陣営の勝利！" : "🦊 妖狐の勝利！(横取り)"}
             </h2>
-            {room.teruteru_won && (
-              <p className="text-xl text-blue-400 font-bold mt-4 animate-bounce">☔ てるてる坊主も追加勝利！</p>
-            )}
+            {room.teruteru_won && <p className="text-xl text-blue-400 font-bold mt-4 animate-bounce">☔ てるてる坊主も追加勝利！</p>}
             <button onClick={() => router.push("/")} className="w-full py-4 bg-gray-600 text-white font-bold rounded mt-8">トップに戻る</button>
           </div>
         )}
@@ -342,20 +347,9 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
         )}
 
         {/* 🌙 夜のフェーズ */}
-        {me.is_alive && room.status !== "finished" && room.phase === "night" && (
+        {me.is_alive && room.status !== "finished" && room.phase === "night" && !showExecutionOverlay && (
           <div className="space-y-4">
-            
-            {/* 💡 誰が処刑されたかの発表エリア */}
-            {room.last_executed && (
-              <div className="bg-red-900/50 border border-red-500 rounded-xl p-4 text-center shadow-lg">
-                <p className="text-sm text-red-200">本日の処刑者</p>
-                <p className="text-2xl font-bold text-white">{room.last_executed}</p>
-              </div>
-            )}
-
             <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg">
-              
-              {/* 各役職の行動UI */}
               {hasActed || ["villager", "baker", "teruteru", "fox"].includes(me.role) ? (
                 <div className="text-center py-10">
                   <p className="text-green-400 font-bold animate-pulse">行動完了！</p>
@@ -405,6 +399,23 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
             )}
           </div>
         )}
+
+        {/* 📖 新規追加：ゲームログ（履歴）エリア */}
+        <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg mt-8">
+          <h3 className="text-lg font-bold text-gray-300 mb-4 border-b border-gray-600 pb-2">📖 ゲームログ</h3>
+          <div className="space-y-2 max-h-48 overflow-y-auto text-sm">
+            {logs.length === 0 ? (
+              <p className="text-gray-500 text-center py-4">まだ記録はありません</p>
+            ) : (
+              logs.map((log) => (
+                <div key={log.id} className="bg-gray-900 p-3 rounded border border-gray-700">
+                  <span className="text-gray-500 font-bold mr-3">[{log.day_count}日目]</span>
+                  <span className="text-gray-300">{log.message}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
 
       </div>
     </div>
