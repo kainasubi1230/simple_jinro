@@ -6,7 +6,21 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 type Player = { id: string; name: string; is_host: boolean; };
-type Room = { id: string; status: string; wolf_count: number; seer_count: number; };
+type Room = { 
+  id: string; 
+  status: string; 
+  phase: string; 
+  day_count: number; 
+  wolf_count: number;
+  seer_count: number;
+  medium_count: number;
+  hunter_count: number;
+  fox_count: number;
+  baker_count: number;
+  teruteru_count: number;
+  last_victims: string | null;
+  teruteru_won: boolean;
+};
 
 export default function RoomPage({ params }: { params: Promise<{ id: string }> }) {
   const resolvedParams = use(params);
@@ -112,7 +126,7 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
   // 🎲 ゲーム開始ボタンを押した時の処理
   const handleStartGame = async () => {
     if (!room) return;
-    const totalRoles = room.wolf_count + room.seer_count;
+    const totalRoles = room.wolf_count + room.seer_count + room.medium_count + room.hunter_count + room.fox_count + room.baker_count + room.teruteru_count;
     
     if (players.length <= totalRoles) {
       alert(`参加者が足りません！人狼(${room.wolf_count}人)と占い師(${room.seer_count}人)の合計より多くの参加者が必要です。`);
@@ -125,10 +139,18 @@ export default function RoomPage({ params }: { params: Promise<{ id: string }> }
       const shuffled = [...players].sort(() => Math.random() - 0.5);
       const updates = shuffled.map((player, index) => {
         let role = "villager";
-        if (index < room.wolf_count) role = "werewolf";
-        else if (index < room.wolf_count + room.seer_count) role = "seer";
+        let count = 0;
+  
+        if (index < (count += room.wolf_count)) role = "werewolf";
+        else if (index < (count += room.seer_count)) role = "seer";
+        else if (index < (count += room.medium_count)) role = "medium";
+        else if (index < (count += room.hunter_count)) role = "hunter";
+        else if (index < (count += room.fox_count)) role = "fox";
+        else if (index < (count += room.baker_count)) role = "baker";
+        else if (index < (count += room.teruteru_count)) role = "teruteru";
+  
         return { id: player.id, role };
-      });
+    });
 
       for (const update of updates) {
         await supabase.from("players").update({ role: update.role }).eq("id", update.id);

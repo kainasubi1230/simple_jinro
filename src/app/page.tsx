@@ -13,6 +13,11 @@ export default function Home() {
 
   const [wolfCount, setWolfCount] = useState(1);
   const [seerCount, setSeerCount] = useState(0);
+  const [mediumCount, setMediumCount] = useState(0);
+  const [hunterCount, setHunterCount] = useState(0);
+  const [foxCount, setFoxCount] = useState(0);
+  const [bakerCount, setBakerCount] = useState(0);
+  const [teruteruCount, setTeruteruCount] = useState(0);
 
   // 🚪 部屋を新しく作る
   const handleCreateRoom = async () => {
@@ -21,10 +26,13 @@ export default function Home() {
 
     try {
       const { data: roomData, error: roomError } = await supabase
-        .from("rooms")
-        .insert([{ status: "waiting", phase: "day", day_count: 1, wolf_count: wolfCount, seer_count: seerCount }])
-        .select()
-        .single();
+      .from("rooms")
+      .insert([{ 
+      status: "waiting", phase: "day", day_count: 1, 
+      wolf_count: wolfCount, seer_count: seerCount,
+      medium_count: mediumCount, hunter_count: hunterCount,
+      fox_count: foxCount, baker_count: bakerCount, teruteru_count: teruteruCount
+      }]).select().single();
       if (roomError) throw roomError;
 
       // 🔥 修正ポイント: select().single() を追加して、登録した自分のデータを受け取る
@@ -45,7 +53,7 @@ export default function Home() {
       setIsLoading(false);
     }
   };
-  
+
 // 🤝 既存の部屋に参加する
   const handleJoinRoom = async () => {
     if (!name || !joinRoomId) return alert("名前とルームIDを入力してください");
