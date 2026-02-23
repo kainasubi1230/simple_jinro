@@ -22,25 +22,27 @@ export default function Home() {
 
   // 🚪 部屋を新しく作る
   const handleCreateRoom = async () => {
-    if (!name) return alert("名前を入力してください");
+    if (!name) return alert("名前を入力しろ");
     setIsLoading(true);
 
     try {
       // roomsテーブルに全役職の人数を保存して作成
       const { data: roomData, error: roomError } = await supabase
         .from("rooms")
-        .insert([{ 
-          status: "waiting", 
-          phase: "day", 
-          day_count: 1, 
-          wolf_count: wolfCount, 
-          seer_count: seerCount,
-          medium_count: mediumCount,
-          hunter_count: hunterCount,
-          fox_count: foxCount,
-          baker_count: bakerCount,
-          teruteru_count: teruteruCount
-        }])
+        .insert([
+          {
+            status: "waiting",
+            phase: "day",
+            day_count: 1,
+            wolf_count: wolfCount,
+            seer_count: seerCount,
+            medium_count: mediumCount,
+            hunter_count: hunterCount,
+            fox_count: foxCount,
+            baker_count: bakerCount,
+            teruteru_count: teruteruCount,
+          },
+        ])
         .select()
         .single();
 
@@ -83,7 +85,9 @@ export default function Home() {
 
       if (roomData.status !== "waiting") {
         setIsLoading(false);
-        return alert("この部屋はすでにゲームが開始されているため、途中参加できません🙅‍♂️");
+        return alert(
+          "この部屋はすでにゲームが開始されているため、途中参加できません🙅‍♂️",
+        );
       }
 
       const { data: playerData, error: playerError } = await supabase
@@ -104,13 +108,35 @@ export default function Home() {
   };
 
   // ＋－ボタンを作るための便利関数
-  const CounterRow = ({ label, count, setter, min, color }: { label: string, count: number, setter: (n: number) => void, min: number, color: string }) => (
+  const CounterRow = ({
+    label,
+    count,
+    setter,
+    min,
+    color,
+  }: {
+    label: string;
+    count: number;
+    setter: (n: number) => void;
+    min: number;
+    color: string;
+  }) => (
     <div className="flex items-center justify-between py-1">
       <span className={`${color} font-medium`}>{label}</span>
       <div className="flex items-center space-x-3">
-        <button onClick={() => setter(Math.max(min, count - 1))} className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white">-</button>
+        <button
+          onClick={() => setter(Math.max(min, count - 1))}
+          className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white"
+        >
+          -
+        </button>
         <span className="w-4 text-center">{count}</span>
-        <button onClick={() => setter(count + 1)} className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white">+</button>
+        <button
+          onClick={() => setter(count + 1)}
+          className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white"
+        >
+          +
+        </button>
       </div>
     </div>
   );
@@ -118,7 +144,9 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4 py-10">
       <div className="w-full max-w-md bg-gray-800 rounded-xl shadow-lg p-8 space-y-8">
-        <h1 className="text-3xl font-bold text-center text-red-500">簡易 人狼ゲーム</h1>
+        <h1 className="text-3xl font-bold text-center text-red-500">
+          簡易 人狼ゲーム
+        </h1>
 
         {/* 名前入力エリア */}
         <div className="space-y-2">
@@ -136,16 +164,60 @@ export default function Home() {
 
         {/* 🎭 役職設定エリア（ホストのみ） */}
         <div className="space-y-2 bg-gray-700 p-4 rounded-lg">
-          <p className="text-sm text-gray-300 font-bold mb-3 border-b border-gray-600 pb-2">配役の設定（部屋を作る人）</p>
-          
-          <CounterRow label="🐺 人狼" count={wolfCount} setter={setWolfCount} min={1} color="text-red-400" />
-          <CounterRow label="🔮 占い師" count={seerCount} setter={setSeerCount} min={0} color="text-blue-400" />
-          <CounterRow label="👻 霊媒師" count={mediumCount} setter={setMediumCount} min={0} color="text-purple-400" />
-          <CounterRow label="🛡️ 狩人" count={hunterCount} setter={setHunterCount} min={0} color="text-green-400" />
-          <CounterRow label="🦊 妖狐" count={foxCount} setter={setFoxCount} min={0} color="text-pink-400" />
-          <CounterRow label="🍞 パン屋" count={bakerCount} setter={setBakerCount} min={0} color="text-yellow-400" />
-          <CounterRow label="☔ てるてる坊主" count={teruteruCount} setter={setTeruteruCount} min={0} color="text-gray-300" />
-          
+          <p className="text-sm text-gray-300 font-bold mb-3 border-b border-gray-600 pb-2">
+            配役の設定（部屋を作る人）
+          </p>
+
+          <CounterRow
+            label="🐺 人狼"
+            count={wolfCount}
+            setter={setWolfCount}
+            min={1}
+            color="text-red-400"
+          />
+          <CounterRow
+            label="🔮 占い師"
+            count={seerCount}
+            setter={setSeerCount}
+            min={0}
+            color="text-blue-400"
+          />
+          <CounterRow
+            label="👻 霊媒師"
+            count={mediumCount}
+            setter={setMediumCount}
+            min={0}
+            color="text-purple-400"
+          />
+          <CounterRow
+            label="🛡️ 狩人"
+            count={hunterCount}
+            setter={setHunterCount}
+            min={0}
+            color="text-green-400"
+          />
+          <CounterRow
+            label="🦊 妖狐"
+            count={foxCount}
+            setter={setFoxCount}
+            min={0}
+            color="text-pink-400"
+          />
+          <CounterRow
+            label="🍞 パン屋"
+            count={bakerCount}
+            setter={setBakerCount}
+            min={0}
+            color="text-yellow-400"
+          />
+          <CounterRow
+            label="☔ てるてる坊主"
+            count={teruteruCount}
+            setter={setTeruteruCount}
+            min={0}
+            color="text-gray-300"
+          />
+
           <p className="text-xs text-gray-400 mt-4 pt-2 border-t border-gray-600">
             ※残りの人数は自動的に「🧑‍🌾 市民」になります。
           </p>
