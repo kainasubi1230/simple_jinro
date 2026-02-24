@@ -6,9 +6,10 @@ import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
 type Player = { id: string; name: string; role: string; is_alive: boolean; is_host: boolean; };
+// ⏱️ 変更点：型定義に day_end_time を追加
 type Room = { 
   id: string; status: string; phase: string; day_count: number; 
-  last_victims: string | null; last_executed: string | null; teruteru_won: boolean; 
+  last_victims: string | null; last_executed: string | null; teruteru_won: boolean; day_end_time: string | null; 
 };
 type Message = { id: string; player_id: string; content: string; };
 type GameLog = { id: string; day_count: number; message: string; created_at: string; };
@@ -23,9 +24,7 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   const [players, setPlayers] = useState<Player[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   
-  // ⏱️ タイマー（自動進行の要！）
   const [timeLeft, setTimeLeft] = useState(180); 
-
   const [selectedTarget, setSelectedTarget] = useState<string | null>(null);
   const [hasActed, setHasActed] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -33,9 +32,10 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   const [logs, setLogs] = useState<GameLog[]>([]);
   const [showExecutionOverlay, setShowExecutionOverlay] = useState(false);
 
-  // ==========================================
-  // 📥 データの初期取得とリアルタイム購読
-  // ==========================================
+  // ⏭️ 新規追加：スキップした人数と自分がスキップしたか
+  const [skipCount, setSkipCount] = useState(0);
+  const [hasSkipped, setHasSkipped] = useState(false);
+
   useEffect(() => {
     const init = async () => {
       const myPlayerId = localStorage.getItem("myPlayerId");
@@ -49,6 +49,13 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
         if (roomData) setRoom(roomData);
         const { data: playersData } = await supabase.from("players").select("*").eq("room_id", roomId);
         if (playersData) setPlayers(playersData);
+        
+        // ⏭️ 自分がスキップ済みか、合計何人スキップしているかを取得
+        if (roomData?.phase === "day") {
+          const { data: actions } = await supabase.from("actions").select("*").eq("room_id", roomId).eq("day_count", roomData.day_count).eq("phase", "day").eq("action_type", "skip");
+          setSkipCount(actions?.length || 0);
+          setHasSkipped(actions?.some(a => a.actor_id === myPlayerId) || false);
+        }
       };
 
       const fetchMessagesAndLogs = async () => {
@@ -62,15 +69,17 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
 
       const channel = supabase.channel(`play_${roomId}`)
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, 
-          (payload) => { setRoom(payload.new as Room); setHasActed(false); setSelectedTarget(null); }
+          (payload) => { 
+            setRoom(payload.new as Room); setHasActed(false); setSelectedTarget(null); setHasSkipped(false); 
+          }
         )
         .on("postgres_changes", { event: "UPDATE", schema: "public", table: "players", filter: `room_id=eq.${roomId}` }, () => fetchAll())
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` },
-          (payload) => setMessages((prev) => [...prev, payload.new as Message])
-        )
-        .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_logs", filter: `room_id=eq.${roomId}` },
-          (payload) => setLogs((prev) => [...prev, payload.new as GameLog])
-        )
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "messages", filter: `room_id=eq.${roomId}` }, (payload) => setMessages((prev) => [...prev, payload.new as Message]))
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "game_logs", filter: `room_id=eq.${roomId}` }, (payload) => setLogs((prev) => [...prev, payload.new as GameLog]))
+        // ⏭️ スキップ投票のリアルタイム更新
+        .on("postgres_changes", { event: "INSERT", schema: "public", table: "actions", filter: `room_id=eq.${roomId}` }, () => {
+          fetchAll();
+        })
         .subscribe();
 
       return () => { supabase.removeChannel(channel); };
@@ -78,15 +87,25 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     init();
   }, [roomId, router]);
 
-  // ==========================================
-  // ⏱️ タイマー＆処刑演出の制御
-  // ==========================================
+  // ⏱️ 変更点：リロードしてもズレない絶対タイマーの計算！
+  // ⏱️ 変更点：リロードしてもズレない絶対タイマーの計算！
   useEffect(() => {
-    if (room?.phase === "day" && timeLeft > 0) {
-      const timerId = setInterval(() => setTimeLeft((prev) => prev - 1), 1000);
+    if (room?.phase === "day" && room.day_end_time) {
+      // 💡 ここがポイント！絶対に文字（string）だと確定させてからタイマーの中で使う
+      const endTimeStr = room.day_end_time; 
+
+      const updateTimer = () => {
+        const end = new Date(endTimeStr).getTime();
+        const now = Date.now();
+        const remain = Math.max(0, Math.floor((end - now) / 1000));
+        setTimeLeft(remain);
+      };
+      
+      updateTimer(); // 即時反映
+      const timerId = setInterval(updateTimer, 1000);
       return () => clearInterval(timerId);
     }
-  }, [room?.phase, timeLeft]);
+  }, [room?.phase, room?.day_end_time]);
 
   useEffect(() => {
     if (room?.phase === "night") {
@@ -96,21 +115,13 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     }
   }, [room?.phase]);
 
-  // ==========================================
-  // 🏁 ゲーム終了時の自動帰還（10秒後にホームへ）
-  // ==========================================
   useEffect(() => {
     if (room?.status === "finished") {
-      const timer = setTimeout(() => {
-        router.push("/");
-      }, 10000); // 10秒待ってから自動でトップへ
+      const timer = setTimeout(() => { router.push("/"); }, 10000);
       return () => clearTimeout(timer);
     }
   }, [room?.status, router]);
 
-  // ==========================================
-  // 🏆 勝敗判定ロジック
-  // ==========================================
   const checkWinOrNextPhase = useCallback(async (nextPhase: string) => {
     const { data: currentPlayers } = await supabase.from("players").select("*").eq("room_id", roomId).eq("is_alive", true);
     if (!currentPlayers) return;
@@ -119,22 +130,20 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     const humanCount = currentPlayers.length - wolfCount;
     const foxAlive = currentPlayers.some(p => p.role === "fox");
 
-    let newStatus = room!.status;
-    let newPhase = nextPhase;
+    let newStatus = room!.status; let newPhase = nextPhase;
+    if (wolfCount === 0) { newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "human_win"; } 
+    else if (wolfCount >= humanCount) { newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "wolf_win"; }
 
-    if (wolfCount === 0) {
-      newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "human_win"; 
-    } else if (wolfCount >= humanCount) {
-      newStatus = "finished"; newPhase = foxAlive ? "fox_win" : "wolf_win";
-    }
-
-    await supabase.from("rooms").update({ status: newStatus, phase: newPhase, day_count: nextPhase === "day" ? room!.day_count + 1 : room!.day_count }).eq("id", roomId);
-    if (nextPhase === "day" && newStatus !== "finished") setTimeLeft(180);
+    // ⏱️ 朝になる時にも新しくタイマーの終了時刻をセットする
+    const endTime = new Date(Date.now() + 180 * 1000).toISOString();
+    await supabase.from("rooms").update({ 
+      status: newStatus, phase: newPhase, 
+      day_count: nextPhase === "day" ? room!.day_count + 1 : room!.day_count,
+      day_end_time: nextPhase === "day" ? endTime : null 
+    }).eq("id", roomId);
   }, [room, roomId]);
 
-  // ==========================================
-  // 🤖 完全自動進行システム（ホストのブラウザが裏側で処理します）
-  // ==========================================
+  // 🤖 オートメーションエンジン（裏側進行）
   const handleExecuteVote = useCallback(async () => {
     const { data: votes } = await supabase.from("actions").select("*").eq("room_id", roomId).eq("day_count", room!.day_count).eq("phase", "vote");
     let victimId = null;
@@ -157,7 +166,6 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     }
     
     await supabase.from("rooms").update({ last_executed: executedName }).eq("id", roomId);
-    
     const logMsg = victimId ? `投票の結果、【${executedName}】が処刑されました。` : `投票の結果、本日の処刑者は出ませんでした。`;
     await supabase.from("game_logs").insert([{ room_id: roomId, day_count: room!.day_count, message: logMsg }]);
 
@@ -167,10 +175,8 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   const handleExecuteMorning = useCallback(async () => {
     const { data: actions } = await supabase.from("actions").select("*").eq("room_id", roomId).eq("day_count", room!.day_count).eq("phase", "night");
 
-    const guardAction = actions?.find(a => a.action_type === "guard");
-    const guardedId = guardAction ? guardAction.target_id : null;
-    const seeAction = actions?.find(a => a.action_type === "see");
-    const seerTargetId = seeAction ? seeAction.target_id : null;
+    const guardAction = actions?.find(a => a.action_type === "guard"); const guardedId = guardAction ? guardAction.target_id : null;
+    const seeAction = actions?.find(a => a.action_type === "see"); const seerTargetId = seeAction ? seeAction.target_id : null;
 
     let wolfTargetId = null;
     const attacks = actions?.filter(a => a.action_type === "attack") || [];
@@ -179,20 +185,15 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
       attacks.forEach(v => { attackCounts[v.target_id] = (attackCounts[v.target_id] || 0) + 1; });
       let maxVotes = 0;
       for (const [targetId, count] of Object.entries(attackCounts)) {
-        if (count > maxVotes) { maxVotes = count; wolfTargetId = targetId; }
-        else if (count === maxVotes && Math.random() > 0.5) wolfTargetId = targetId;
+        if (count > maxVotes) { maxVotes = count; wolfTargetId = targetId; } else if (count === maxVotes && Math.random() > 0.5) wolfTargetId = targetId;
       }
     }
 
     let victimIds: string[] = [];
-
     if (wolfTargetId) {
       const targetPlayer = players.find(p => p.id === wolfTargetId);
-      if (wolfTargetId === guardedId) { /* 護衛成功 */ }
-      else if (targetPlayer?.role === "fox") { /* 妖狐無敵 */ }
-      else { victimIds.push(wolfTargetId); }
+      if (wolfTargetId === guardedId) { /* 護衛成功 */ } else if (targetPlayer?.role === "fox") { /* 妖狐無敵 */ } else { victimIds.push(wolfTargetId); }
     }
-
     if (seerTargetId) {
       const targetPlayer = players.find(p => p.id === seerTargetId);
       if (targetPlayer?.role === "fox" && !victimIds.includes(seerTargetId)) { victimIds.push(seerTargetId); }
@@ -201,60 +202,67 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     const victimNames = victimIds.map(id => players.find(p => p.id === id)?.name).join(" と ");
     const lastVictimsText = victimIds.length > 0 ? victimNames : "なし";
 
-    if (victimIds.length > 0) {
-      for (const vId of victimIds) { await supabase.from("players").update({ is_alive: false }).eq("id", vId); }
-    }
+    if (victimIds.length > 0) { for (const vId of victimIds) { await supabase.from("players").update({ is_alive: false }).eq("id", vId); } }
 
     await supabase.from("rooms").update({ last_victims: lastVictimsText }).eq("id", roomId);
-    
     const logMsg = victimIds.length > 0 ? `無残な姿で発見されたのは【${lastVictimsText}】でした。` : `昨晩は誰も犠牲になりませんでした。平和な朝です。`;
     await supabase.from("game_logs").insert([{ room_id: roomId, day_count: room!.day_count + 1, message: logMsg }]);
 
     await checkWinOrNextPhase("day");
   }, [roomId, room, players, checkWinOrNextPhase]);
 
-  // 🔥 オートメーションエンジン（ホストのブラウザが裏で回します）
+  // 🔥 オートメーションエンジン（ホスト監視用）
   useEffect(() => {
-    if (!me?.is_host || room?.status === "finished") return; // 死んでいても is_host は true なので動作します！
+    if (!me?.is_host || room?.status === "finished") return;
 
-    // 【昼の自動進行】タイマーが0になったら投票へ
+    // 【昼の自動進行・時間切れ】
     if (room?.phase === "day" && timeLeft === 0) {
       supabase.from("rooms").update({ phase: "vote" }).eq("id", roomId);
     }
+    
+    // 【昼の自動進行・全員スキップ】
+    if (room?.phase === "day") {
+      const checkSkip = async () => {
+        const aliveCount = players.filter(p => p.is_alive).length;
+        const { count } = await supabase.from("actions").select("*", { count: "exact", head: true }).eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "day").eq("action_type", "skip");
+        if (count !== null && count >= aliveCount && aliveCount > 0) {
+          supabase.from("rooms").update({ phase: "vote" }).eq("id", roomId);
+        }
+      };
+      checkSkip();
+    }
 
-    // 【夕方の自動進行】生きている全員が投票し終わったら夜へ
+    // 【夕方の自動進行】全員投票
     if (room?.phase === "vote") {
       const checkVoting = async () => {
         const aliveCount = players.filter(p => p.is_alive).length;
-        const { count } = await supabase.from("actions").select("*", { count: "exact", head: true })
-          .eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "vote");
+        const { count } = await supabase.from("actions").select("*", { count: "exact", head: true }).eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "vote");
         if (count !== null && count >= aliveCount) setTimeout(() => { handleExecuteVote(); }, 3000);
       };
       checkVoting();
     }
 
-    // 【夜の自動進行】必要な能力者が全員行動し終わったら朝へ
+    // 【夜の自動進行】全員行動
     if (room?.phase === "night") {
       const checkMorning = async () => {
         const nightActionRoles = ["werewolf", "seer", "medium", "hunter"];
         const requiredActionCount = players.filter(p => p.is_alive && nightActionRoles.includes(p.role)).length;
-        const { count } = await supabase.from("actions").select("*", { count: "exact", head: true })
-          .eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "night");
+        const { count } = await supabase.from("actions").select("*", { count: "exact", head: true }).eq("room_id", roomId).eq("day_count", room.day_count).eq("phase", "night");
         if (count !== null && count >= requiredActionCount) setTimeout(() => { handleExecuteMorning(); }, 3000);
       };
       checkMorning();
     }
-  }, [room?.phase, room?.day_count, room?.status, timeLeft, players, me?.is_host, roomId, handleExecuteVote, handleExecuteMorning]);
+  }, [room?.phase, room?.day_count, room?.status, timeLeft, players, me?.is_host, roomId, handleExecuteVote, handleExecuteMorning, skipCount]);
 
-  // ホストの強制スキップ用（昼間のタイマーを待てない時用）
-  const handleSkipToVote = async () => {
-    if (!confirm("議論を強制終了して投票に進みますか？")) return;
-    await supabase.from("rooms").update({ phase: "vote" }).eq("id", roomId);
+  // ⏭️ 自分がスキップ投票をする関数
+  const handleSkipVote = async () => {
+    if (!me || hasSkipped) return;
+    try {
+      await supabase.from("actions").insert([{ room_id: roomId, day_count: room!.day_count, phase: "day", actor_id: me.id, target_id: me.id, action_type: "skip" }]);
+      setHasSkipped(true);
+    } catch (error) { console.error(error); }
   };
 
-  // ==========================================
-  // 🧑‍🌾 個人のアクション処理
-  // ==========================================
   const handleAction = async (actionType: string) => {
     if (!selectedTarget || !me || !room) return;
     try {
@@ -262,13 +270,8 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
       setHasActed(true);
 
       const target = players.find(p => p.id === selectedTarget);
-      if (actionType === "see") {
-        const isWolf = target?.role === "werewolf";
-        alert(`🔮占い結果: ${target?.name} は【${isWolf ? "人狼" : "市民陣営"}】です。`);
-      } else if (actionType === "medium") {
-        const isWolf = target?.role === "werewolf";
-        alert(`👻霊媒結果: ${target?.name} は【${isWolf ? "人狼" : "市民陣営"}】でした。`);
-      }
+      if (actionType === "see") alert(`🔮占い結果: ${target?.name} は【${target?.role === "werewolf" ? "人狼" : "市民陣営"}】です。`);
+      else if (actionType === "medium") alert(`👻霊媒結果: ${target?.name} は【${target?.role === "werewolf" ? "人狼" : "市民陣営"}】でした。`);
     } catch (error) { console.error(error); }
   };
 
@@ -278,9 +281,6 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
     setChatInput("");
   };
 
-  // ==========================================
-  // 🖥️ UIの描画
-  // ==========================================
   if (isLoading || !me || !room) return <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">読み込み中...</div>;
 
   if (showExecutionOverlay && room.status !== "finished") {
@@ -296,6 +296,7 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
   const aliveOtherPlayers = players.filter(p => p.is_alive && p.id !== me.id);
   const deadPlayers = players.filter(p => !p.is_alive);
   const isBakerAlive = players.some(p => p.role === "baker" && p.is_alive);
+  const aliveTotalCount = players.filter(p => p.is_alive).length; // ⏭️ 生きている全人数
 
   const getRoleName = (r: string) => {
     const roles: Record<string, string> = { werewolf: "🐺 人狼", seer: "🔮 占い師", villager: "🧑‍🌾 市民", medium: "👻 霊媒師", hunter: "🛡️ 狩人", fox: "🦊 妖狐", baker: "🍞 パン屋", teruteru: "☔ てるてる坊主" };
@@ -335,10 +336,6 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
           <div className="bg-gray-800 rounded-xl p-8 text-center border border-gray-700 shadow-lg">
             <h2 className="text-2xl font-bold text-gray-400 mb-2">あなたは死亡しました👻</h2>
             <p className="text-sm text-gray-500">ゲームの行く末を静かに見守りましょう...</p>
-            {/* ホストが死んでいてもスキップできるようにボタンを設置 */}
-            {me.is_host && room.phase === "day" && (
-              <button onClick={handleSkipToVote} className="w-full mt-6 py-2 border border-red-500 text-red-400 rounded">議論を強制終了する(ホスト権限)</button>
-            )}
           </div>
         )}
 
@@ -351,12 +348,18 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
                 <p className="text-xl font-bold text-red-400">{room.last_victims}</p>
               </div>
             )}
-            {isBakerAlive && room.day_count > 1 && (
-              <p className="text-yellow-300 font-bold bg-yellow-900/50 py-2 rounded shadow-inner">🥐 おいしいパンが配られました</p>
-            )}
+            {isBakerAlive && room.day_count > 1 && <p className="text-yellow-300 font-bold bg-yellow-900/50 py-2 rounded shadow-inner">🥐 おいしいパンが配られました</p>}
+            
             <div className="text-6xl font-mono">{Math.floor(timeLeft / 60)}:{(timeLeft % 60).toString().padStart(2, "0")}</div>
             <p className="text-xs text-gray-400">0になると自動で投票に移ります</p>
-            {me.is_host && <button onClick={handleSkipToVote} className="w-full mt-4 py-2 border border-red-500 text-red-400 rounded">議論を強制終了する(ホスト権限)</button>}
+
+            {/* ⏭️ 全員スキップボタン */}
+            <div className="pt-4 border-t border-gray-700">
+              <p className="text-xs text-gray-400 mb-2">生存者全員が同意すると時間を飛ばせます ({skipCount}/{aliveTotalCount}人 準備OK)</p>
+              <button onClick={handleSkipVote} disabled={hasSkipped} className="w-full py-3 border border-blue-500 text-blue-400 hover:bg-blue-900/30 rounded disabled:opacity-50 disabled:border-gray-600 disabled:text-gray-500 transition">
+                {hasSkipped ? "同意済み (他の人待ち)" : "議論を早く切り上げる (スキップ同意)"}
+              </button>
+            </div>
           </div>
         )}
 
@@ -439,13 +442,11 @@ export default function PlayPage({ params }: { params: Promise<{ id: string }> }
           </div>
         )}
 
-        {/* 📖 ゲームログ（誰が死んでいても常に見えます！） */}
+        {/* 📖 ゲームログ */}
         <div className="bg-gray-800 rounded-xl p-6 border border-gray-700 shadow-lg mt-8">
           <h3 className="text-lg font-bold text-gray-300 mb-4 border-b border-gray-600 pb-2">📖 ゲームログ</h3>
           <div className="space-y-2 max-h-48 overflow-y-auto text-sm flex flex-col-reverse">
-            {logs.length === 0 ? (
-              <p className="text-gray-500 text-center py-4">まだ記録はありません</p>
-            ) : (
+            {logs.length === 0 ? <p className="text-gray-500 text-center py-4">まだ記録はありません</p> : (
               [...logs].reverse().map((log) => (
                 <div key={log.id} className="bg-gray-900 p-3 rounded border border-gray-700">
                   <span className="text-gray-500 font-bold mr-3">[{log.day_count}日目]</span>
