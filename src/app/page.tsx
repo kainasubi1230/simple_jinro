@@ -22,7 +22,7 @@ export default function Home() {
 
   // 🚪 部屋を新しく作る
   const handleCreateRoom = async () => {
-    if (!name) return alert("名前を入力しろyeah");
+    if (!name) return alert("名前を入力しろ");
     setIsLoading(true);
 
     try {
