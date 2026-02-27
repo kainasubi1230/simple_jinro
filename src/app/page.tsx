@@ -25,7 +25,7 @@ export default function Home() {
   };
 
   const handleCreateRoom = async () => {
-    if (!name) return alert("名前を入力してください");
+    if (!name) return alert("名前を入力してくださいyeah");
     setIsLoading(true);
 
     // 新しい5桁のルームIDを生成
@@ -34,19 +34,21 @@ export default function Home() {
     try {
       const { data: roomData, error: roomError } = await supabase
         .from("rooms")
-        .insert([{ 
-          id: newRoomId, // 💡 ここで生成した5桁の数字をIDとしてデータベースに送ります！
-          status: "waiting", 
-          phase: "day", 
-          day_count: 1, 
-          wolf_count: wolfCount, 
-          seer_count: seerCount,
-          medium_count: mediumCount,
-          hunter_count: hunterCount,
-          fox_count: foxCount,
-          baker_count: bakerCount,
-          teruteru_count: teruteruCount
-        }])
+        .insert([
+          {
+            id: newRoomId, // 💡 ここで生成した5桁の数字をIDとしてデータベースに送ります！
+            status: "waiting",
+            phase: "day",
+            day_count: 1,
+            wolf_count: wolfCount,
+            seer_count: seerCount,
+            medium_count: mediumCount,
+            hunter_count: hunterCount,
+            fox_count: foxCount,
+            baker_count: bakerCount,
+            teruteru_count: teruteruCount,
+          },
+        ])
         .select()
         .single();
 
@@ -87,7 +89,9 @@ export default function Home() {
 
       if (roomData.status !== "waiting") {
         setIsLoading(false);
-        return alert("この部屋はすでにゲームが開始されているため、途中参加できません🙅‍♂️");
+        return alert(
+          "この部屋はすでにゲームが開始されているため、途中参加できません🙅‍♂️",
+        );
       }
 
       const { data: playerData, error: playerError } = await supabase
@@ -107,13 +111,35 @@ export default function Home() {
     }
   };
 
-  const CounterRow = ({ label, count, setter, min, color }: { label: string, count: number, setter: (n: number) => void, min: number, color: string }) => (
+  const CounterRow = ({
+    label,
+    count,
+    setter,
+    min,
+    color,
+  }: {
+    label: string;
+    count: number;
+    setter: (n: number) => void;
+    min: number;
+    color: string;
+  }) => (
     <div className="flex items-center justify-between py-1">
       <span className={`${color} font-medium`}>{label}</span>
       <div className="flex items-center space-x-3">
-        <button onClick={() => setter(Math.max(min, count - 1))} className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white">-</button>
+        <button
+          onClick={() => setter(Math.max(min, count - 1))}
+          className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white"
+        >
+          -
+        </button>
         <span className="w-4 text-center">{count}</span>
-        <button onClick={() => setter(count + 1)} className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white">+</button>
+        <button
+          onClick={() => setter(count + 1)}
+          className="bg-gray-600 w-8 h-8 rounded-full font-bold hover:bg-gray-500 text-white"
+        >
+          +
+        </button>
       </div>
     </div>
   );
@@ -121,36 +147,104 @@ export default function Home() {
   return (
     <main className="min-h-screen flex flex-col items-center justify-center bg-gray-900 text-white p-4 py-10">
       <div className="w-full max-w-md bg-gray-800 rounded-xl shadow-lg p-8 space-y-8">
-        <h1 className="text-3xl font-bold text-center text-red-500">簡易 人狼ゲーム</h1>
+        <h1 className="text-3xl font-bold text-center text-red-500">
+          簡易 人狼ゲーム
+        </h1>
 
         <div className="space-y-2">
           <label className="text-sm text-gray-400">あなたの名前</label>
-          <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500" placeholder="例: 村人A" />
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-red-500"
+            placeholder="例: 村人A"
+          />
         </div>
 
         <hr className="border-gray-600" />
 
         <div className="space-y-2 bg-gray-700 p-4 rounded-lg">
-          <p className="text-sm text-gray-300 font-bold mb-3 border-b border-gray-600 pb-2">配役の設定（部屋を作る人）</p>
-          <CounterRow label="🐺 人狼" count={wolfCount} setter={setWolfCount} min={1} color="text-red-400" />
-          <CounterRow label="🔮 占い師" count={seerCount} setter={setSeerCount} min={0} color="text-blue-400" />
-          <CounterRow label="👻 霊媒師" count={mediumCount} setter={setMediumCount} min={0} color="text-purple-400" />
-          <CounterRow label="🛡️ 狩人" count={hunterCount} setter={setHunterCount} min={0} color="text-green-400" />
-          <CounterRow label="🦊 妖狐" count={foxCount} setter={setFoxCount} min={0} color="text-pink-400" />
-          <CounterRow label="🍞 パン屋" count={bakerCount} setter={setBakerCount} min={0} color="text-yellow-400" />
-          <CounterRow label="☔ てるてる坊主" count={teruteruCount} setter={setTeruteruCount} min={0} color="text-gray-300" />
-          <p className="text-xs text-gray-400 mt-4 pt-2 border-t border-gray-600">※残りの人数は自動的に「🧑‍🌾 市民」になります。</p>
+          <p className="text-sm text-gray-300 font-bold mb-3 border-b border-gray-600 pb-2">
+            配役の設定（部屋を作る人）
+          </p>
+          <CounterRow
+            label="🐺 人狼"
+            count={wolfCount}
+            setter={setWolfCount}
+            min={1}
+            color="text-red-400"
+          />
+          <CounterRow
+            label="🔮 占い師"
+            count={seerCount}
+            setter={setSeerCount}
+            min={0}
+            color="text-blue-400"
+          />
+          <CounterRow
+            label="👻 霊媒師"
+            count={mediumCount}
+            setter={setMediumCount}
+            min={0}
+            color="text-purple-400"
+          />
+          <CounterRow
+            label="🛡️ 狩人"
+            count={hunterCount}
+            setter={setHunterCount}
+            min={0}
+            color="text-green-400"
+          />
+          <CounterRow
+            label="🦊 妖狐"
+            count={foxCount}
+            setter={setFoxCount}
+            min={0}
+            color="text-pink-400"
+          />
+          <CounterRow
+            label="🍞 パン屋"
+            count={bakerCount}
+            setter={setBakerCount}
+            min={0}
+            color="text-yellow-400"
+          />
+          <CounterRow
+            label="☔ てるてる坊主"
+            count={teruteruCount}
+            setter={setTeruteruCount}
+            min={0}
+            color="text-gray-300"
+          />
+          <p className="text-xs text-gray-400 mt-4 pt-2 border-t border-gray-600">
+            ※残りの人数は自動的に「🧑‍🌾 市民」になります。
+          </p>
         </div>
 
-        <button onClick={handleCreateRoom} disabled={isLoading} className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded transition disabled:opacity-50">
+        <button
+          onClick={handleCreateRoom}
+          disabled={isLoading}
+          className="w-full py-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded transition disabled:opacity-50"
+        >
           {isLoading ? "処理中..." : "配役を決定して部屋を作る"}
         </button>
 
         <div className="text-center text-gray-400 text-sm">または</div>
 
         <div className="space-y-4">
-          <input type="number" value={joinRoomId} onChange={(e) => setJoinRoomId(e.target.value)} className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 tracking-widest text-center text-xl" placeholder="5桁の数字" />
-          <button onClick={handleJoinRoom} disabled={isLoading} className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition disabled:opacity-50">
+          <input
+            type="number"
+            value={joinRoomId}
+            onChange={(e) => setJoinRoomId(e.target.value)}
+            className="w-full p-3 rounded bg-gray-700 text-white focus:outline-none focus:ring-2 focus:ring-blue-500 tracking-widest text-center text-xl"
+            placeholder="5桁の数字"
+          />
+          <button
+            onClick={handleJoinRoom}
+            disabled={isLoading}
+            className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded transition disabled:opacity-50"
+          >
             {isLoading ? "処理中..." : "部屋に参加する"}
           </button>
         </div>
