@@ -72,8 +72,7 @@ export default function Home() {
   };
 
   const handleJoinRoom = async () => {
-    if (!name || !joinRoomId)
-      return alert("名前とnasubiのルームIDを入力してください");
+    if (!name || !joinRoomId) return alert("名前とルームIDを入力してください");
     setIsLoading(true);
 
     try {
