@@ -25,7 +25,7 @@ export default function Home() {
   };
 
   const handleCreateRoom = async () => {
-    if (!name) return alert("名前を入力してくださいyeah");
+    if (!name) return alert("名前を入力してください");
     setIsLoading(true);
 
     // 新しい5桁のルームIDを生成
@@ -72,7 +72,8 @@ export default function Home() {
   };
 
   const handleJoinRoom = async () => {
-    if (!name || !joinRoomId) return alert("名前とルームIDを入力してください");
+    if (!name || !joinRoomId)
+      return alert("名前とnasubiのルームIDを入力してください");
     setIsLoading(true);
 
     try {
